@@ -1,9 +1,12 @@
 #ifndef AMREX_ML_MG_H_
 #define AMREX_ML_MG_H_
+#include "AMReX_Geometry.H"
+#include "AMReX_MultiFab.H"
 #include <AMReX_Config.H>
 
 #include <AMReX_MLLinOp.H>
 #include <AMReX_MLCGSolver.H>
+#include <AMReX_PlotFileUtil.H>
 
 namespace amrex {
 
@@ -187,6 +190,8 @@ public:
     void addInterpCorrection (int alev, int mglev);
 
     void computeResOfCorrection (int amrlev, int mglev);
+
+    void writeDiagnostics (const RT &atol, bool fine_converged);
 
     RT ResNormInf (int alev, bool local = false);
     RT MLResNormInf (int alevmax, bool local = false);
@@ -470,6 +475,10 @@ MLMGT<MF>::solve (const Vector<AMF*>& a_sol, const Vector<AMF const*>& a_rhs,
                                        << " resid, resid/" << norm_name << " = "
                                        << composite_norminf << ", "
                                        << composite_norminf/max_norm << "\n";
+                    }
+
+                    if (true) { // zisen - debug information for MLMG solve
+                        writeDiagnostics(RT(1.e20)*max_norm, fine_converged);
                     }
 
                     if ( throw_exception ) {
@@ -1708,6 +1717,115 @@ MLMGT<MF>::computeResOfCorrection (int amrlev, int mglev)
     const MF& b =    res[amrlev][mglev];
     MF      & r = rescor[amrlev][mglev];
     linop.correctionResidual(amrlev, mglev, r, x, b, BCMode::Homogeneous);
+}
+
+// Ouput residuals
+template <typename MF>
+void
+MLMGT<MF>::writeDiagnostics (const RT &atol, bool fine_converged)
+{
+    int myproc = amrex::ParallelDescriptor::MyProc();  // Return the rank
+    int nprocs = amrex::ParallelDescriptor::NProcs();  // Return the number of processes
+    int ioproc = ParallelDescriptor::IOProcessorNumber();  // I/O rank
+    std::string stab = "  ";
+
+    bool converged_l = true;
+    amrex::Vector<RT> res_lev(finest_amr_lev+1, 0.0);
+    amrex::Vector<int> converged_lev(finest_amr_lev+1, 1);
+    for (int alev = 0; alev <= finest_amr_lev; alev++) {
+        res_lev[alev] = ResNormInf(alev, true);
+        if (res_lev[alev] > atol) {
+            converged_lev[alev] = 0;
+            converged_l = false;
+        }
+    } 
+
+    const BoxArray& ba0 = res[0][0].boxArray();
+    auto const dx0 = linop.m_geom[0][0].CellSizeArray();
+    const auto geomdata0 = linop.m_geom[0][0].data();
+    const amrex::Real* prob_lo0 = geomdata0.ProbLo();
+    amrex::Real x0=+1.E30, x1 = -1.E30, y0 = +1.E30, y1 = -1.E30, z0 = +1.E30, z1 = -1.E30;
+    for (MFIter mfi(res[0][0], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        x0 = std::min(x0, prob_lo0[0] + bx.loVect()[0] * dx0[0]);
+        x1 = std::max(x1, prob_lo0[0] + (bx.hiVect()[0]+1) * dx0[0]);
+        y0 = std::min(y0, prob_lo0[1] + bx.loVect()[1] * dx0[1]);
+        y1 = std::max(y1, prob_lo0[1] + (bx.hiVect()[1]+1) * dx0[1]);
+        z0 = std::min(z0, prob_lo0[2] + bx.loVect()[2] * dx0[2]);
+        z1 = std::max(z1, prob_lo0[2] + (bx.hiVect()[2]+1) * dx0[2]);
+    }
+
+    amrex::Print(ioproc) << "\n================= Diagnostics of MLMG ================ " << std::endl;
+    amrex::Print(ioproc) << "- Fine_converged?: " << (fine_converged ? "yes" : "no") << std::endl;
+    amrex::Real lref = 5E-4;  // Coordinate normalized by lref.
+    for (int iproc = 0; iproc < nprocs; iproc++) {
+        ParallelDescriptor::Barrier();
+        if (iproc == myproc) {
+            if (!converged_l) {
+                amrex::Print(myproc) << "- Proc " << myproc << " in region ";
+                amrex::Print(myproc) << "[" << x0 << ", " << x1 << "]m x "; 
+                amrex::Print(myproc) << "[" << y0 << ", " << y1 << "]m x "; 
+                amrex::Print(myproc) << "[" << z0 << ", " << z1 << "]m"; 
+                amrex::Print(myproc) << std::endl;
+
+                amrex::Print(myproc) << stab << "- if converged at levels: " << std::endl;
+                for (int alev = 0; alev <= finest_amr_lev; alev++) {
+                    amrex::Print(myproc) << stab+stab << "- lev " << alev 
+                        << ": " << (converged_lev[alev] ? "yes" : "no") << std::endl;
+                    auto const dx = linop.m_geom[alev][0].CellSizeArray();
+                    const auto geomdata = linop.m_geom[alev][0].data();
+                    const amrex::Real* prob_lo = geomdata.ProbLo();
+
+                    if (converged_lev[alev]) continue;
+
+                    amrex::Print(myproc) << stab+stab+stab << 
+                        "At (i,j,k,n) = (x,y,z)/lref, lref = " << lref << std::endl; 
+
+                    for (MFIter mfi(res[alev][0], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+                        const Box& bx = mfi.validbox();
+                        Array4<Real> const& fabs = res[alev][0].array(mfi);
+                        amrex::ParallelFor(bx, res[alev][0].nComp(), [=] 
+                            AMREX_GPU_DEVICE(int i, int j, int k, int n) noexcept
+                        {
+                            if (fabs(i, j, k, n) > atol) {
+                                amrex::Print(myproc) << stab+stab+stab << "At (" 
+                                    << i << "," << j << "," << k << "," << n << ") = (" 
+                                    << std::setprecision(4) << std::scientific 
+                                    << (prob_lo[0]+(amrex::Real(i)+0.5)*dx[0])/lref << "," 
+                                    << (prob_lo[1]+(amrex::Real(j)+0.5)*dx[1])/lref << "," 
+                                    << (prob_lo[2]+(amrex::Real(k)+0.5)*dx[2])/lref << "), " 
+                                    << "Res = " << fabs(i, j, k, n) << std::endl;
+                            };
+                        });
+                    } // mfi
+                } // alev
+            } // if converged_l
+        } // if myproc == iproc
+    } // iterate over all procs
+
+    //UtilCreateCleanDirectory("residual/Level_"+std::to_string(alev), false);
+    //VisMF::Write(res[alev][mlev], "residual/Level_"+std::to_string(alev));
+    // linop.writeResidual(0);
+    int nComp = res[0][0].nComp();
+    amrex::Vector<amrex::MultiFab> res_MF;
+    amrex::Vector<amrex::Geometry> res_geom;
+    Vector<int> istep;
+    Vector<IntVect> ref_ratio;
+    for (int alev = 0; alev <= finest_amr_lev; alev++) {
+        res_MF.emplace_back(res[alev][0], amrex::make_alias, 0, res[alev][0].nComp());
+        res_geom.emplace_back(linop.m_geom[alev][0]);
+        istep.emplace_back(1);
+        IntVect iv(AMREX_D_DECL(2,2,2));
+        ref_ratio.emplace_back(iv);
+    }
+    std::string outname = "residual";
+    Vector<std::string> names(nComp);
+    for (int n = 0; n < nComp; n++) {
+        names[n] = "comp" + std::to_string(n);
+    }
+
+    WriteMultiLevelPlotfile(outname, finest_amr_lev+1, 
+        GetVecOfConstPtrs(res_MF), names, res_geom, 0.0, istep, ref_ratio);
 }
 
 // Compute single-level masked inf-norm of Residual (res).
