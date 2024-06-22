@@ -1788,13 +1788,13 @@ MLMGT<MF>::writeDiagnostics (const RT &atol, bool fine_converged)
                             AMREX_GPU_DEVICE(int i, int j, int k, int n) noexcept
                         {
                             if (fabs(i, j, k, n) > atol) {
-                                amrex::Print(myproc) << stab+stab+stab << "At (" 
-                                    << i << "," << j << "," << k << "," << n << ") = (" 
-                                    << std::setprecision(4) << std::scientific 
-                                    << (prob_lo[0]+(amrex::Real(i)+0.5)*dx[0])/lref << "," 
-                                    << (prob_lo[1]+(amrex::Real(j)+0.5)*dx[1])/lref << "," 
-                                    << (prob_lo[2]+(amrex::Real(k)+0.5)*dx[2])/lref << "), " 
-                                    << "Res = " << fabs(i, j, k, n) << std::endl;
+                                //amrex::Print(myproc) << stab+stab+stab << "At (" 
+                                //    << i << "," << j << "," << k << "," << n << ") = (" 
+                                //    << std::setprecision(4) << std::scientific 
+                                //    << (prob_lo[0]+(amrex::Real(i)+0.5)*dx[0])/lref << "," 
+                                //    << (prob_lo[1]+(amrex::Real(j)+0.5)*dx[1])/lref << "," 
+                                //    << (prob_lo[2]+(amrex::Real(k)+0.5)*dx[2])/lref << "), " 
+                                //    << "Res = " << fabs(i, j, k, n) << std::endl;
                             };
                         });
                     } // mfi

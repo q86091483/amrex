@@ -1,40 +1,59 @@
 #
-# For PAWSEY machines: Magnus
+# For PAWSEY machines: setonix
 #
 
-ifneq ($(which_computer),$(filter $(which_computer),magnus))
+ifneq ($(which_computer),$(filter $(which_computer),setonix))
   $(error Unknown PAWSEY computer, $(which_computer))
 else
-  $(info Loading compiler settings for Magnus@PAWSEY)
+  $(info Loading compiler settings for Setonix@PAWSEY)
 endif
 
+#ifdef PE_ENV
+#  lowercase_peenv := $(shell echo $(PE_ENV) | tr A-Z a-z)
+#  ifneq ($(lowercase_peenv),$(lowercase_comp))
+#    has_compiler_mismatch = COMP=$(COMP) does not match PrgEnv-$(lowercase_peenv)
+#  endif
+#endif
 
-ifdef PE_ENV
-  lowercase_peenv := $(shell echo $(PE_ENV) | tr A-Z a-z)
-  ifneq ($(lowercase_peenv),$(lowercase_comp))
-    has_compiler_mismatch = COMP=$(COMP) does not match PrgEnv-$(lowercase_peenv)
+#CFLAGS   := $(subst -O2,-O3,$(CFLAGS))
+#CXXFLAGS := $(subst -O2,-O3,$(CXXFLAGS))
+#FFLAGS   := $(subst -O2,-O3,$(FFLAGS))
+#F90FLAGS := $(subst -O2,-O3,$(F90FLAGS))
+
+#CFLAGS   += -xHASWELL -fma
+#CXXFLAGS += -xHASWELL -fma
+#FFLAGS   += -xHASWELL -fma
+#F90FLAGS += -xHASWELL -fma
+
+#ifeq ($(USE_MPI),TRUE)
+#  CC  = cc
+#  CXX = CC
+#  FC  = ftn
+#  F90 = ftn
+#  LIBRARIES += -lmpichf90
+#endif
+
+#ifeq ($(USE_SENSEI_INSITU),TRUE)
+#  CXXFLAGS += -fPIC -dynamic
+#  LIBRARIES += -ldl
+#endif
+
+ifeq ($(which_computer),setonix)
+  ifeq ($(USE_HIP),TRUE)
+    # MI250X
+    AMD_ARCH=gfx90a
   endif
-endif
 
-CFLAGS   := $(subst -O2,-O3,$(CFLAGS))
-CXXFLAGS := $(subst -O2,-O3,$(CXXFLAGS))
-FFLAGS   := $(subst -O2,-O3,$(FFLAGS))
-F90FLAGS := $(subst -O2,-O3,$(F90FLAGS))
-
-CFLAGS   += -xHASWELL -fma
-CXXFLAGS += -xHASWELL -fma
-FFLAGS   += -xHASWELL -fma
-F90FLAGS += -xHASWELL -fma
-
-ifeq ($(USE_MPI),TRUE)
-  CC  = cc
-  CXX = CC
-  FC  = ftn
-  F90 = ftn
-  LIBRARIES += -lmpichf90
-endif
-
-ifeq ($(USE_SENSEI_INSITU),TRUE)
-  CXXFLAGS += -fPIC -dynamic
-  LIBRARIES += -ldl
+  ifeq ($(USE_MPI),TRUE)
+    includes += $(shell CC --cray-print-opts=cflags)
+    ifneq ($(BL_NO_FORT),TRUE)
+      LIBRARIES += $(shell ftn --cray-print-opts=libs)
+    else
+      LIBRARIES += $(shell CC --cray-print-opts=libs)
+    endif
+    # for gpu aware mpi
+    ifeq ($(USE_HIP),TRUE)
+      LIBRARIES += $(PE_MPICH_GTL_DIR_amd_gfx90a) -lmpi_gtl_hsa
+    endif
+  endif
 endif
