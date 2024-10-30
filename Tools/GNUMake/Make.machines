@@ -15,7 +15,8 @@ endif
 host_name := $(shell hostname -f)
 host_name_short := $(shell hostname -s)
 
-host_name = setonix
+#host_name = narval
+#host_name = setonix
 
 # MACHINES supported
 
@@ -148,6 +149,11 @@ ifeq ($(findstring setonix, $(host_name)), setonix)
   which_site := pawsey
   #which_computer := magnus
   which_computer := setonix
+endif
+
+ifeq ($(findstring narval, $(host_name)), narval)
+  which_site := narval
+  which_computer := narval
 endif
 
 ifeq ($(findstring raijin, $(host_name)), raijin)
